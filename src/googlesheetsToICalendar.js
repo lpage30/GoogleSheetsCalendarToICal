@@ -130,18 +130,26 @@ const getDatetimes = (datesubjecttime, fallYear) => {
 const getICalEvent = (extractedScheduleEvent, fallYear) => {
     const datesubjecttime = extractedScheduleEvent.split(' - ')
     const dateTimes = getDatetimes(datesubjecttime, fallYear)
+    const subject = datesubjecttime.length > 1 ? datesubjecttime[1] : datesubjecttime[0]
     const start = dateTimes[0]
-    const end = dateTimes.length === 0 ? null : 
-                new Date(dateTimes.length > 1 ? dateTimes[1].getHours() : 
-                dateTimes[0].setHours(dateTimes[0].getHours() + DEFAULT_DURATION_HRS))
-    const uniqueName = `${start.getMonth()}${start.getFullYear()}${datesubjecttime[1]}`;
+    let end = null
+
+    if (dateTimes.length > 0) {
+        if (dateTimes.length > 1) {
+            end = dateTimes[1]
+        } else {
+            end = new Date(dateTimes[0].toISOString())
+            end.setHours(end.getHours() + DEFAULT_DURATION_HRS)
+        }
+    }
+    const uniqueName = `${start.getMonth()}${start.getFullYear()}${subject}`;
     const uid = uuid(uniqueName, namespace);
     const result = {
         start,
         end,
         uid,
         allDay: dateTimes.some(datetime => datetime.getHours() === 0),
-        summary: datesubjecttime[1],
+        summary: subject,
     }
     return result
 }
@@ -154,12 +162,15 @@ async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
         const response = await fetch(calendarSheetsUrls[i])
         const xmlText = await response.text()
         const jsonObject = xmlToJsonParser.parse(xmlText)
-        const events = jsonObject.html.head.meta.body.div[1].div[0].div.table.tbody.tr
+        const data = jsonObject.html.head.meta.body.div[1].div[0].div.table.tbody.tr
             .map(item => item.td.filter(isEvent))
             .filter(item => item.length === 1)
             .map(item => item[0])
+        const events = data
             .map(item => getICalEvent(item, fallYear))
         result.push(...events)
+        console.warn(data, events)
+
     }
     return result
 }
