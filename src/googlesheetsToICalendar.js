@@ -185,16 +185,20 @@ const getDatetimes = (datesubjecttime, fallYear) => {
             if (date.end) {
                 newDate.end = date.end
             }
-            hrMinutes.forEach(hrminute => {
-                newDate.start.setHours(hrminute.hrs, hrminute.minute)
-                if (newDate.end) {
-                    newDate.end.setHours(hrminute.hrs, hrminute.minute)
+            if (hrMinutes.length > 0) {
+                if (typeof(date.end) === 'undefined') {
+                    newDate.end = new Date(newDate.start.getFullYear(), newDate.start.getMonth(), newDate.start.getDate(), 
+                        newDate.start.getHours(), newDate.start.getMinutes(), newDate.start.getSeconds())
                 }
-                newDates.push(newDate)
-            })
-            if (hrMinutes.length === 0) {
-                newDates.push(newDate)
+
+                hrMinutes.forEach((hrminute, index) => {
+                    if (index === 0) {
+                        newDate.start.setHours(hrminute.hrs, hrminute.minute)
+                    }
+                    newDate.end.setHours(hrminute.hrs, hrminute.minute)
+                })
             }
+            newDates.push(newDate)
         }
         return newDates
     }).map(items => items[0])
@@ -218,7 +222,7 @@ const getICalEvents = (extractedScheduleEvent, fallYear) => {
     const subject = datesubjecttime.length > 1 ? datesubjecttime[1] : datesubjecttime[0]
     const result = []
     dateTimes.forEach(datetime => {
-        const start = datetime.start
+        let start = datetime.start
         const allDay = datetime.start.getHours() === 0
         let end = datetime.end
         if (allDay && end) {
@@ -227,6 +231,10 @@ const getICalEvents = (extractedScheduleEvent, fallYear) => {
         if (typeof(end) === 'undefined' && !allDay) {
             end = new Date(start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes(), start.getSeconds())
             end.setHours(end.getHours() + DEFAULT_DURATION_HRS)
+        }
+        start = new Date(start.toISOString())
+        if (end) {
+            end = new Date(end.toISOString())
         }
 
         const summary = dateTimes.length > 1 ? `${subject} (day ${result.length + 1} / ${dateTimes.length})`: subject
