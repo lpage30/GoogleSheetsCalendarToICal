@@ -7,26 +7,47 @@ const uuid = require('uuid/v5')
 const googleCalendar = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSoARRvPLLH7NaG_AD7Jf2fHv-d9XXhW7nZLsSHiRWiQCqC7a-mg8nx15mxxjsyFqF_lJ5YGPaJo-WF/pubhtml'
 const writeFileAsync = promisify(writeFile)
 
-const MONTHS = ['Jan', 'Feb', 'March', 'April', 'May', 'June', 'Sept', 'Oct', 'Nov', 'Dec']
-const MONTH_NUM = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11]
-const ACADEMIC_YEAR_OFFSET = [1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
+const TD_BLACKLIST_VALUES = ['S', 'M', 'T', 'W', 'Th', 'F',
+    'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER', 'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY']
+const MONTHS = ['Jan', 'January', 'Feb', 'February', 'March', 'April', 'May', 'June', 'July', 
+    'Aug', 'August', 'Sept', 'September', 'Oct', 'October', 'Nov', 'November', 'Dec', 'December']
+const MONTH_NUM = [0, 0, 1, 1, 2, 3, 4, 5, 6, 
+    7, 7, 8, 8, 9, 9, 10, 10, 11, 11]
+const ACADEMIC_YEAR_OFFSET = [1, 1, 1, 1, 1, 1, 1, 1, 1, 
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 const TIME_REGEX = new RegExp('[0-9]{1,2}:[0-9][0-9][ ]*(am|pm|a.m.|p.m.){0,1}', 'ig')
 const TIMEAM_REGEX = new RegExp('[0-9][ ]*(am|a.m.)', 'ig')
 const DEFAULT_DURATION_HRS = 1
 const sortDateAsc = (l, r) => l < r ? -1 : l > r ? 1 : 0
 const namespace = Array.from('googlesheets_cal').map(s => s.charCodeAt(0));
 
+const isEvent = (data) => typeof(data) === 'string' &&
+    data.length > 0 &&
+    !TD_BLACKLIST_VALUES.includes(data) &&
+    MONTHS.some(value => data.startsWith(value));
+
+const isNumber = char => !/\s/.test(char) && !isNaN(char)
 const indexOfNonNumber = (line) => {
     let offset = 0
-    while(!isNaN(line.substr(offset, 1)))  {
+    while (true && offset < line.length) {
+     const char = line.substr(offset, 1)
+     if (isNumber(char)) {
         offset += 1
+     } else {
+         break
+     }
     }
     return offset
 }
 const indexOfNumber= (line) => {
     let offset = 0
-    while(isNaN(line.substr(offset, 1))) {
-        offset += 1
+    while (true && offset < line.length) {
+        const char = line.substr(offset, 1)
+        if (!isNumber(char)) {
+            offset += 1
+        } else {
+            break
+        }
     }
     return offset
 }
@@ -47,12 +68,15 @@ const extractDates = (line, fallYear) => {
             mos = m
         }
         let numberOffset = indexOfNumber(line)
+        if (numberOffset >= line.length) {
+            break;
+        }
         line = line.substr(numberOffset).trim()
         let nonNumberOffset = indexOfNonNumber(line)
         day = parseInt(line.substr(0, nonNumberOffset), 10)
         line = line.substr(nonNumberOffset).trim()
         result.push(getDate(mos, day, fallYear))
-        const delimIndex = getLowestIndex([line.indexOf('-'), line.indexOf('&')])
+        const delimIndex = getLowestIndex([line.indexOf('-'), line.indexOf('&'), line.indexOf('/')])
         if (delimIndex >= 0 && delimIndex <= 4) {
             line = line.substr(delimIndex + 1).trim()
         } else {
@@ -109,16 +133,21 @@ const getDatetimes = (datesubjecttime, fallYear) => {
     const times = datesubjecttime.length > 2 ? datesubjecttime[2].match(TIME_REGEX) : datesubjecttime.length > 1 ? datesubjecttime[1].match(TIME_REGEX) : datesubjecttime[0].match(TIME_REGEX)
     const hrMinutes = (times || []).map(time => toHoursMinute(time))
     return dates.map(date => {
-         const dates = []
-         hrMinutes.forEach(hrminute => {
-             date.setHours(hrminute.hrs, hrminute.minute)
-             dates.push(new Date(date.toISOString()))
-         })
-         if (hrMinutes.length === 0) {
-             dates.push(new Date(date.toISOString()))
-         }
-         return dates
-        }).map(items => items[0])
+         const newDates = []
+         try {
+            const newDate = new Date(date.toISOString())
+            hrMinutes.forEach(hrminute => {
+                newDate.setHours(hrminute.hrs, hrminute.minute)
+                newDates.push(new Date(newDate.toISOString()))
+            })
+            if (hrMinutes.length === 0) {
+                newDates.push(new Date(newDate.toISOString()))
+            }
+        } catch (error) {
+            console.error('DateTime issue', datesubjecttime, hrMinutes, dates, date, error)
+        }
+        return newDates
+    }).map(items => items[0])
 }
 /**
  * Convert the passed event extracted from HTML to
@@ -154,22 +183,41 @@ const getICalEvent = (extractedScheduleEvent, fallYear) => {
     return result
 }
 
-const isEvent = (data) => data.length > 0 && MONTHS.some(value => data.startsWith(value));
+function extractTableRows(headElement) {
+    const result = []
+    if (headElement.table) {
+        headElement.table.tbody.tr.forEach(tr => {
+            const data = tr.td.map(td => {
+                if (typeof(td) === 'object' && td.div) {
+                    return td.div
+                }
+                return td
+            }).filter(isEvent)
+            result.push(...data)
+        })
+    } else {
+        if (headElement.div && headElement.div instanceof Array) {
+            headElement.div.forEach(elem => {
+                result.push(...extractTableRows(elem))
+            })
+        } 
+    }
+    return result
+}
+async function fetchGoogleSheetCalendarData(uri) {
+    const response = await fetch(uri)
+    const xmlText = await response.text()
+    const jsonObject = xmlToJsonParser.parse(xmlText)
+    return extractTableRows(jsonObject.html.head.meta.body)
+}
 
 async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
     const result = []
     for(let i = 0; i < calendarSheetsUrls.length; i++) {
-        const response = await fetch(calendarSheetsUrls[i])
-        const xmlText = await response.text()
-        const jsonObject = xmlToJsonParser.parse(xmlText)
-        const data = jsonObject.html.head.meta.body.div[1].div[0].div.table.tbody.tr
-            .map(item => item.td.filter(isEvent))
-            .filter(item => item.length === 1)
-            .map(item => item[0])
+        const data = await fetchGoogleSheetCalendarData(calendarSheetsUrls[i])
         const events = data
             .map(item => getICalEvent(item, fallYear))
         result.push(...events)
-        console.warn(data, events)
 
     }
     return result

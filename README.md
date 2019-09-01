@@ -5,7 +5,7 @@ Calendars specified in GoogleSheets should be ICal format or have ICal option. S
 obtain 1 or more URLs for Google Sheets Calendars  
 
 ```
-npm run ConvertToICal -- -i <url1> <url2> ... <urln> [-o <icaloutputfile] [-t <ical-title>]
+npm run ConvertToICal -- -i <url1> <url2> ... <urln> [-y <fall-year>] [-o <icaloutputfile] [-t <ical-title>]
 
 
 npm run ConvertToICal -- 
