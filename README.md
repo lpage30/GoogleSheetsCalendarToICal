@@ -16,7 +16,8 @@ npm run ConvertToICal --
 Options
 
   -t, --title string         (optional) Title for created icalendar. (default: Google Sheets)    
-  -o, --output string        (optional) Filename of ical file to create. (default: googlesheets.ical       
+  -o, --output string        (optional) Filename of ical file to create. (default: googlesheets.ical
+  -y, --fallYear number (required) 4 digit year for fall of academic calendar
   -i, --input uri   (required) 1 or more URI's each to a google sheets page to download and use to create   
                              icalendar file.                                                               
   -h, --help                 Usage or help information                                                     

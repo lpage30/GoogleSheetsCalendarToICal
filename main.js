@@ -10,6 +10,8 @@ const optionDefinitions = [
       description: `(optional) Title for created icalendar. (default: ${DEFAULT_TITLE})`},
     { name: 'output', alias: 'o', type: String, defaultValue: DEFAULT_OUTPUT,
       description: `(optional) Filename of ical file to create. (default: ${DEFAULT_OUTPUT}` },
+    { name: 'fallYear', alias: 'y', type: Number, defaultValue: (new Date()).getFullYear(),
+      description: `(required) 4 digit year for fall of academic calendar. (default: ${(new Date()).getFullYear()}` },
     { name: 'input', alias: 'i',  multiple: true, type: (uri) => new URL(uri),
       description: '(required) 1 or more URI\'s each to a google sheets page download and use to create icalendar file.' },
     { name: 'help', alias: 'h', type: Boolean, description: 'Usage or help information'},
@@ -49,7 +51,7 @@ async function main(argv = [], scriptName='main') {
         urls,
     })
     try {
-        await writeICalendar(urls, args.title, args.output)
+        await writeICalendar(urls, args.title, args.fallYear, args.output)
         console.log('Finished creating icalendar file!', args.output)
     } catch(error) {
         console.error('Failed to create icalendar file.', error)

@@ -14,9 +14,54 @@ const TIME_REGEX = new RegExp('[0-9]{1,2}:[0-9][0-9][ ]*(am|pm|a.m.|p.m.){0,1}',
 const TIMEAM_REGEX = new RegExp('[0-9][ ]*(am|a.m.)', 'ig')
 const DEFAULT_DURATION_HRS = 1
 const sortDateAsc = (l, r) => l < r ? -1 : l > r ? 1 : 0
+const namespace = Array.from('googlesheets_cal').map(s => s.charCodeAt(0));
 
-
+const indexOfNonNumber = (line) => {
+    let offset = 0
+    while(!isNaN(line.substr(offset, 1)))  {
+        offset += 1
+    }
+    return offset
+}
+const indexOfNumber= (line) => {
+    let offset = 0
+    while(isNaN(line.substr(offset, 1))) {
+        offset += 1
+    }
+    return offset
+}
 const getDate = (month, day, fallYear) => new Date(fallYear + ACADEMIC_YEAR_OFFSET[MONTHS.indexOf(month)], MONTH_NUM[MONTHS.indexOf(month)], day)
+const getLowestIndex = (indexes) => {
+    const nonNeg = indexes.filter(index => index >= 0)
+    if (nonNeg.length === 0) return -1
+    return nonNeg.sort(sortDateAsc)[0]
+}
+const extractDates = (line, fallYear) => {
+    const result = []
+    let mos
+    let day
+    while (true) {
+        const m = MONTHS.filter(mos => line.startsWith(mos))[0]
+        if (m) {
+            line = line.substr(m.length + 1).trim()
+            mos = m
+        }
+        let numberOffset = indexOfNumber(line)
+        line = line.substr(numberOffset).trim()
+        let nonNumberOffset = indexOfNonNumber(line)
+        day = parseInt(line.substr(0, nonNumberOffset), 10)
+        line = line.substr(nonNumberOffset).trim()
+        result.push(getDate(mos, day, fallYear))
+        const delimIndex = getLowestIndex([line.indexOf('-'), line.indexOf('&')])
+        if (delimIndex >= 0 && delimIndex <= 4) {
+            line = line.substr(delimIndex + 1).trim()
+        } else {
+            break;
+        }
+    }
+    return result
+}
+
 const getDates = (dateline, fallYear) => {
     const result = []
     const monthday = dateline.split('-')
@@ -31,6 +76,7 @@ const getDates = (dateline, fallYear) => {
         const day = !isNaN(monthDay.substr(0, 2)) ? parseInt(monthDay.substr(0, 2), 10) : parseInt(monthDay.substr(0, 1), 10)
         result.push(getDate(month, day, fallYear))
     })
+    return result
 }
 const toHoursMinute = time => {
     const hrsminute = time.split(':')
@@ -59,8 +105,8 @@ const toHoursMinute = time => {
     return { hrs, minute }
 }
 const getDatetimes = (datesubjecttime, fallYear) => {
-    const dates = datesubjecttime.length > 1 ? getDates(datesubjecttime[0], fallYear) : [new Date(fallYear)]
-    const times = datesubjecttime.length > 2 ? datesubjecttime[2].match(TIME_REGEX) : datesubjecttime.length > 1 ? datesubjecttime[1].match(TIME_REGEX) : datesubjecttime.match(TIME_REGEX)
+    const dates = datesubjecttime.length > 1 ? getDates(datesubjecttime[0], fallYear) : extractDates(datesubjecttime[0], fallYear)
+    const times = datesubjecttime.length > 2 ? datesubjecttime[2].match(TIME_REGEX) : datesubjecttime.length > 1 ? datesubjecttime[1].match(TIME_REGEX) : datesubjecttime[0].match(TIME_REGEX)
     const hrMinutes = (times || []).map(time => toHoursMinute(time))
     return dates.map(date => {
          const dates = []
@@ -72,7 +118,7 @@ const getDatetimes = (datesubjecttime, fallYear) => {
              dates.push(new Date(date.toISOString()))
          }
          return dates
-        })
+        }).map(items => items[0])
 }
 /**
  * Convert the passed event extracted from HTML to
@@ -90,13 +136,14 @@ const getICalEvent = (extractedScheduleEvent, fallYear) => {
                 dateTimes[0].setHours(dateTimes[0].getHours() + DEFAULT_DURATION_HRS))
     const uniqueName = `${start.getMonth()}${start.getFullYear()}${datesubjecttime[1]}`;
     const uid = uuid(uniqueName, namespace);
-    return {
+    const result = {
         start,
         end,
         uid,
         allDay: dateTimes.some(datetime => datetime.getHours() === 0),
         summary: datesubjecttime[1],
     }
+    return result
 }
 
 const isEvent = (data) => data.length > 0 && MONTHS.some(value => data.startsWith(value));
@@ -124,7 +171,7 @@ async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
  * @param {number} fallYear
  */
 async function createICalendar(calendarSheetsUrls, calendarTitle, fallYear) {
-    const icalEvents = googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear)
+    const icalEvents = await googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear)
     icalEvents.sort((l, r) => sortDateAsc(l.start, r.start))
     const result = ical({
         name: calendarTitle
