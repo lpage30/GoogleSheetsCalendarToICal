@@ -15,6 +15,16 @@ const MONTH_NUM = [0, 0, 1, 1, 2, 3, 4, 5, 6,
     7, 7, 8, 8, 9, 9, 10, 10, 11, 11]
 const ACADEMIC_YEAR_OFFSET = [1, 1, 1, 1, 1, 1, 1, 1, 1, 
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+const DATE_REGEX = new RegExp('^[0-9]{1,2}/[0-9]{1,2}')
+const DATE_RANGE_REGEX = new RegExp('^[0-9]{1,2}/[0-9]{1,2}\s*-\s*[0-9]{1,2}/[0-9]{1,2}')
+const getMonthDay = (slashDate) => {
+    const moday = slashDate.split('/')
+    return {
+        month: parseInt(moday[0], 10) -1,
+        day: parseInt(moday[1], 10)
+    }
+}
+const ENDASH_REGEX = new RegExp(String.fromCharCode(8211),'g')
 const TIME_REGEX = new RegExp('[0-9]{1,2}:[0-9][0-9][ ]*(am|pm|a.m.|p.m.){0,1}', 'ig')
 const TIMEAM_REGEX = new RegExp('[0-9][ ]*(am|a.m.)', 'ig')
 const DEFAULT_DURATION_HRS = 1
@@ -24,7 +34,8 @@ const namespace = Array.from('googlesheets_cal').map(s => s.charCodeAt(0));
 const isEvent = (data) => typeof(data) === 'string' &&
     data.length > 0 &&
     !TD_BLACKLIST_VALUES.includes(data) &&
-    MONTHS.some(value => data.startsWith(value));
+    (MONTHS.some(value => data.startsWith(value)) ||
+     DATE_REGEX.test(data));
 
 const isNumber = char => !/\s/.test(char) && !isNaN(char)
 const indexOfNonNumber = (line) => {
@@ -51,34 +62,56 @@ const indexOfNumber= (line) => {
     }
     return offset
 }
-const getDate = (month, day, fallYear) => new Date(fallYear + ACADEMIC_YEAR_OFFSET[MONTHS.indexOf(month)], MONTH_NUM[MONTHS.indexOf(month)], day)
-const getLowestIndex = (indexes) => {
-    const nonNeg = indexes.filter(index => index >= 0)
-    if (nonNeg.length === 0) return -1
-    return nonNeg.sort(sortDateAsc)[0]
+const getDate = (month, day, fallYear) => {
+    const monthIndex = typeof(month) === 'string' ? MONTHS.indexOf(month) : MONTH_NUM.indexOf(month)
+    return new Date(fallYear + ACADEMIC_YEAR_OFFSET[monthIndex], MONTH_NUM[monthIndex], day)
+}
+const getLowestIndexLen = (line, delimiters) => {
+    const indexLens = delimiters
+        .map(delim => ({ index: line.indexOf(delim), length: delim.length }))
+        .filter(indexLen => indexLen.index >= 0)
+    if (indexLens.length === 0) return { index: -1, length: 0 }
+    return indexLens.sort((l, r) => l.index < r.index ? -1 : l.index > r.index ? 1 : 0)[0]
 }
 const extractDates = (line, fallYear) => {
-    const result = []
+    const result = [{}]
     let mos
     let day
+    let lastResult = 0
     while (true) {
-        const m = MONTHS.filter(mos => line.startsWith(mos))[0]
-        if (m) {
-            line = line.substr(m.length + 1).trim()
-            mos = m
+        if (DATE_REGEX.test(line)) {
+            monthdaysubstring = line.match(DATE_REGEX)[0]
+            moday = getMonthDay(monthdaysubstring)
+            mos = moday.month
+            day = moday.day
+            line = line.substr(monthdaysubstring.length).trim()
+        } else {
+            const m = MONTHS.filter(mos => line.startsWith(mos))[0]
+            if (m) {
+                line = line.substr(m.length + 1).trim()
+                mos = m
+            }
+            let numberOffset = indexOfNumber(line)
+            if (numberOffset >= line.length) {
+                break;
+            }
+            line = line.substr(numberOffset).trim()
+            let nonNumberOffset = indexOfNonNumber(line)
+            day = parseInt(line.substr(0, nonNumberOffset), 10)
+            line = line.substr(nonNumberOffset).trim()
         }
-        let numberOffset = indexOfNumber(line)
-        if (numberOffset >= line.length) {
-            break;
+        if (typeof(result[lastResult].start) === 'undefined') {
+            result[lastResult].start = getDate(mos, day, fallYear)
+        } else {
+            result[lastResult].end = getDate(mos, day, fallYear)
         }
-        line = line.substr(numberOffset).trim()
-        let nonNumberOffset = indexOfNonNumber(line)
-        day = parseInt(line.substr(0, nonNumberOffset), 10)
-        line = line.substr(nonNumberOffset).trim()
-        result.push(getDate(mos, day, fallYear))
-        const delimIndex = getLowestIndex([line.indexOf('-'), line.indexOf('&'), line.indexOf('/')])
-        if (delimIndex >= 0 && delimIndex <= 4) {
-            line = line.substr(delimIndex + 1).trim()
+        const delimIndexLen = getLowestIndexLen(line, ['-', '&amp;', '/'])
+        if (delimIndexLen.index >= 0 && delimIndexLen.index <= 4) {
+            if ('-' !== line.substr(delimIndexLen.index, delimIndexLen.length)) {
+                result.push({})
+                lastResult += 1
+            }
+            line = line.substr(delimIndexLen.index + delimIndexLen.length).trim()
         } else {
             break;
         }
@@ -87,19 +120,31 @@ const extractDates = (line, fallYear) => {
 }
 
 const getDates = (dateline, fallYear) => {
-    const result = []
+    const result = [{}]
     const monthday = dateline.split('-')
     let month
+    let day
     monthday.forEach(monthDay => {
         monthDay = monthDay.trim()
-        const mos = MONTHS.filter(mos => monthDay.startsWith(mos))[0]
-        if (mos) {
-            monthDay = monthDay.substr(mos.length+1).trim()
-            month = mos
+        if (DATE_REGEX.test(monthDay)) {
+            moday = getMonthDay(monthDay)
+            month = moday.month
+            day = moday.day
+        } else {
+            const mos = MONTHS.filter(mos => monthDay.startsWith(mos))[0]
+            if (mos) {
+                monthDay = monthDay.substr(mos.length+1).trim()
+                month = mos
+            }
+            day = !isNaN(monthDay.substr(0, 2)) ? parseInt(monthDay.substr(0, 2), 10) : parseInt(monthDay.substr(0, 1), 10)
         }
-        const day = !isNaN(monthDay.substr(0, 2)) ? parseInt(monthDay.substr(0, 2), 10) : parseInt(monthDay.substr(0, 1), 10)
-        result.push(getDate(month, day, fallYear))
+        if (!result[0].start) {
+            result[0].start = getDate(month, day, fallYear)
+        } else {
+            result[0].end = getDate(month, day, fallYear)
+        }
     })
+    
     return result
 }
 const toHoursMinute = time => {
@@ -134,17 +179,22 @@ const getDatetimes = (datesubjecttime, fallYear) => {
     const hrMinutes = (times || []).map(time => toHoursMinute(time))
     return dates.map(date => {
          const newDates = []
-         try {
-            const newDate = new Date(date.toISOString())
+         if (date.start) {
+            const newDate = {}
+            newDate.start = date.start
+            if (date.end) {
+                newDate.end = date.end
+            }
             hrMinutes.forEach(hrminute => {
-                newDate.setHours(hrminute.hrs, hrminute.minute)
-                newDates.push(new Date(newDate.toISOString()))
+                newDate.start.setHours(hrminute.hrs, hrminute.minute)
+                if (newDate.end) {
+                    newDate.end.setHours(hrminute.hrs, hrminute.minute)
+                }
+                newDates.push(newDate)
             })
             if (hrMinutes.length === 0) {
-                newDates.push(new Date(newDate.toISOString()))
+                newDates.push(newDate)
             }
-        } catch (error) {
-            console.error('DateTime issue', datesubjecttime, hrMinutes, dates, date, error)
         }
         return newDates
     }).map(items => items[0])
@@ -154,53 +204,71 @@ const getDatetimes = (datesubjecttime, fallYear) => {
  * an ICal-generator Event object.
  * 
  * @param {string} extractedScheduleEvent 
- * @return {Object} ical object to be passed to ical-generator createEvent
+ * @return {Object[]} ical objects to be passed to ical-generator createEvent
  */
-const getICalEvent = (extractedScheduleEvent, fallYear) => {
-    const datesubjecttime = extractedScheduleEvent.split(' - ')
+const getICalEvents = (extractedScheduleEvent, fallYear) => {
+    let datesubjecttime = extractedScheduleEvent.split(' - ')
+    if (DATE_RANGE_REGEX.test(extractedScheduleEvent)) {
+        const daterange = extractedScheduleEvent.match(DATE_RANGE_REGEX)[0]
+        const splitsubject = extractedScheduleEvent.substr(daterange.length).split(' - ')
+        datesubjecttime = [daterange]
+        splitsubject.filter(substr => substr.trim().length > 0).forEach(substr => datesubjecttime.push(substr))
+    }
     const dateTimes = getDatetimes(datesubjecttime, fallYear)
     const subject = datesubjecttime.length > 1 ? datesubjecttime[1] : datesubjecttime[0]
-    const start = dateTimes[0]
-    let end = null
-
-    if (dateTimes.length > 0) {
-        if (dateTimes.length > 1) {
-            end = dateTimes[1]
-        } else {
-            end = new Date(dateTimes[0].toISOString())
+    const result = []
+    dateTimes.forEach(datetime => {
+        const start = datetime.start
+        const allDay = datetime.start.getHours() === 0
+        let end = datetime.end
+        if (allDay && end) {
+            end.setHours(end.getHours() + 24)
+        }
+        if (typeof(end) === 'undefined' && !allDay) {
+            end = new Date(start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes(), start.getSeconds())
             end.setHours(end.getHours() + DEFAULT_DURATION_HRS)
         }
-    }
-    const uniqueName = `${start.getMonth()}${start.getFullYear()}${subject}`;
-    const uid = uuid(uniqueName, namespace);
-    const result = {
-        start,
-        end,
-        uid,
-        allDay: dateTimes.some(datetime => datetime.getHours() === 0),
-        summary: subject,
-    }
+
+        const summary = dateTimes.length > 1 ? `${subject} (day ${result.length + 1} / ${dateTimes.length})`: subject
+        const uniqueName = `${start.getMonth()}${start.getFullYear()}${summary}`;
+        const uid = uuid(uniqueName, namespace);
+        result.push({
+            start,
+            end,
+            uid,
+            allDay,
+            summary,
+        })
+    })
     return result
 }
 
 function extractTableRows(headElement) {
     const result = []
+    if (headElement instanceof Array) {
+        headElement.forEach(elem => {
+            result.push(...extractTableRows(elem))
+        })
+        return result
+    }
     if (headElement.table) {
         headElement.table.tbody.tr.forEach(tr => {
             const data = tr.td.map(td => {
                 if (typeof(td) === 'object' && td.div) {
-                    return td.div
+                    return td.div.trim()
+                } else if (typeof(td) === 'string') {
+                    return td.trim()
+                } else {
+                    return ''
                 }
-                return td
-            }).filter(isEvent)
+            }).map(data => data.startsWith('(') ? data.substr(1, data.length - 2).trim() : data)
+            .filter(isEvent).map(data => data.replace(ENDASH_REGEX, '-'))
             result.push(...data)
         })
     } else {
-        if (headElement.div && headElement.div instanceof Array) {
-            headElement.div.forEach(elem => {
-                result.push(...extractTableRows(elem))
-            })
-        } 
+        if (headElement.div) {
+            return extractTableRows(headElement.div)
+        }
     }
     return result
 }
@@ -208,17 +276,14 @@ async function fetchGoogleSheetCalendarData(uri) {
     const response = await fetch(uri)
     const xmlText = await response.text()
     const jsonObject = xmlToJsonParser.parse(xmlText)
-    return extractTableRows(jsonObject.html.head.meta.body)
+    return [...new Set(extractTableRows(jsonObject.html.head.meta.body))]
 }
 
 async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
     const result = []
     for(let i = 0; i < calendarSheetsUrls.length; i++) {
         const data = await fetchGoogleSheetCalendarData(calendarSheetsUrls[i])
-        const events = data
-            .map(item => getICalEvent(item, fallYear))
-        result.push(...events)
-
+        data.forEach(item => result.push(...getICalEvents(item, fallYear)))
     }
     return result
 }
