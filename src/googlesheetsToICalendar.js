@@ -17,13 +17,18 @@ const MONTH_NUM = [0, 0, 1, 1, 2, 3, 4, 5, 6,
 const ACADEMIC_YEAR_OFFSET = [1, 1, 1, 1, 1, 1, 1, 1, 1, 
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 const DATE_REGEX = new RegExp('^[0-9]{1,2}/[0-9]{1,2}')
-const DATE_RANGE_REGEX = new RegExp('^[0-9]{1,2}/[0-9]{1,2}\s*-\s*[0-9]{1,2}/[0-9]{1,2}')
+const DATE_RANGE_REGEX = new RegExp('^[0-9]{1,2}/[0-9]{1,2}[ ]*-[ ]*[0-9]{1,2}/[0-9]{1,2}')
 const getMonthDay = (slashDate) => {
     const moday = slashDate.split('/')
     return {
         month: parseInt(moday[0], 10) -1, 
         day: parseInt(moday[1], 10)
     }
+}
+const htmlToText = (text) => {
+    return text
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
 }
 const ENDASH_REGEX = new RegExp(String.fromCharCode(8211),'g')
 const TIME_REGEX = new RegExp('[0-9]{1,2}:[0-9][0-9][ ]*(am|pm|a.m.|p.m.){0,1}', 'ig')
@@ -268,7 +273,7 @@ function extractTableRows(headElement, tableNames, useTableNames) {
                     return ''
                 }
             }).map(data => data.startsWith('(') ? data.substr(1, data.length - 2).trim() : data.trim())
-            .filter(data => data.length > 0).map(data => data.replace(ENDASH_REGEX, '-'))
+            .filter(data => data.length > 0).map(data => htmlToText(data.replace(ENDASH_REGEX, '-')))
             items.push(...cells)
         })
         result.push({ tableName, data: _.uniq(items.filter(isEvent)) })
