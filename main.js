@@ -1,6 +1,6 @@
 const CommandLineArgs = require('command-line-args')
 const CommandLineUsage = require('command-line-usage')
-const { writeICalendar } = require('./src/googleSheetsToICalendar')
+const { writeICalendars } = require('./src/googleSheetsToICalendar')
 
 const DEFAULT_TITLE = 'Google Sheets'
 const DEFAULT_OUTPUT= 'googlesheets.ical'
@@ -51,8 +51,8 @@ async function main(argv = [], scriptName='main') {
         urls,
     })
     try {
-        await writeICalendar(urls, args.title, args.fallYear, args.output)
-        console.log('Finished creating icalendar file!', args.output)
+        const filenames = await writeICalendars(urls, args.title, args.fallYear, args.output)
+        console.log('Finished creating icalendar files!', filenames)
     } catch(error) {
         console.error('Failed to create icalendar file.', error)
     }

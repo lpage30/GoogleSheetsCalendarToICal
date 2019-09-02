@@ -1,5 +1,6 @@
 const xmlToJsonParser = require('fast-xml-parser')
 const { writeFile } = require('fs')
+const _ = require('lodash')
 const fetch = require('node-fetch')
 const ical = require('ical-generator')
 const { promisify } = require('util')
@@ -20,7 +21,7 @@ const DATE_RANGE_REGEX = new RegExp('^[0-9]{1,2}/[0-9]{1,2}\s*-\s*[0-9]{1,2}/[0-
 const getMonthDay = (slashDate) => {
     const moday = slashDate.split('/')
     return {
-        month: parseInt(moday[0], 10) -1,
+        month: parseInt(moday[0], 10) -1, 
         day: parseInt(moday[1], 10)
     }
 }
@@ -251,17 +252,14 @@ const getICalEvents = (extractedScheduleEvent, fallYear) => {
     return result
 }
 
-function extractTableRows(headElement) {
+function extractTableRows(headElement, tableNames, useTableNames) {
     const result = []
-    if (headElement instanceof Array) {
-        headElement.forEach(elem => {
-            result.push(...extractTableRows(elem))
-        })
-        return result
-    }
-    if (headElement.table) {
+    if (headElement.table && (!useTableNames || tableNames.length > 0)) {
+        const tableName = tableNames.length > 0 ? ` ${tableNames[0]}` : ''
+        tableNames.shift()
+        const items = []
         headElement.table.tbody.tr.forEach(tr => {
-            const data = tr.td.map(td => {
+            const cells = tr.td.map(td => {
                 if (typeof(td) === 'object' && td.div) {
                     return td.div.trim()
                 } else if (typeof(td) === 'string') {
@@ -269,29 +267,50 @@ function extractTableRows(headElement) {
                 } else {
                     return ''
                 }
-            }).map(data => data.startsWith('(') ? data.substr(1, data.length - 2).trim() : data)
-            .filter(isEvent).map(data => data.replace(ENDASH_REGEX, '-'))
-            result.push(...data)
+            }).map(data => data.startsWith('(') ? data.substr(1, data.length - 2).trim() : data.trim())
+            .filter(data => data.length > 0).map(data => data.replace(ENDASH_REGEX, '-'))
+            items.push(...cells)
         })
-    } else {
-        if (headElement.div) {
-            return extractTableRows(headElement.div)
-        }
+        result.push({ tableName, data: _.uniq(items.filter(isEvent)) })
+        return result
+    } 
+    if (headElement instanceof Array) {
+        headElement.forEach(elem => {
+            result.push(...extractTableRows(elem, tableNames, useTableNames))
+        })
+        return result
+    }
+    if (headElement.div) {
+        return extractTableRows(headElement.div, tableNames, useTableNames)
     }
     return result
+}
+function extractTableNames(bodyElement) {
+    if(bodyElement.div[0] && bodyElement.div[0].ul && bodyElement.div[0].ul.li) {
+        return bodyElement.div[0].ul.li.map(elem => elem.a.trim())
+    }
+    return []
 }
 async function fetchGoogleSheetCalendarData(uri) {
     const response = await fetch(uri)
     const xmlText = await response.text()
     const jsonObject = xmlToJsonParser.parse(xmlText)
-    return [...new Set(extractTableRows(jsonObject.html.head.meta.body))]
+    const tableNames = extractTableNames(jsonObject.html.head.meta.body)
+    return extractTableRows(jsonObject.html.head.meta.body, tableNames, tableNames.length > 0)
 }
 
 async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
     const result = []
     for(let i = 0; i < calendarSheetsUrls.length; i++) {
         const data = await fetchGoogleSheetCalendarData(calendarSheetsUrls[i])
-        data.forEach(item => result.push(...getICalEvents(item, fallYear)))
+        data.forEach(tableData => {
+            const events = []
+            tableData.data.forEach(item => events.push(...getICalEvents(item, fallYear)))
+            result.push({
+                tableName: tableData.tableName,
+                events,
+            })
+        })
     }
     return result
 }
@@ -302,14 +321,26 @@ async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
  * @param {string} calendarTitle Name to give ICalendar
  * @param {number} fallYear
  */
-async function createICalendar(calendarSheetsUrls, calendarTitle, fallYear) {
+async function createICalendars(calendarSheetsUrls, calendarTitle, fallYear) {
     const icalEvents = await googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear)
-    icalEvents.sort((l, r) => sortDateAsc(l.start, r.start))
-    const result = ical({
-        name: calendarTitle
+    const result = []
+    icalEvents.forEach(cal => {
+        cal.events.sort((l, r) => sortDateAsc(l.start, r.start))
+        const calendar = ical({
+            name: `${calendarTitle}${cal.tableName}`,
+        })
+        cal.events.forEach(event => calendar.createEvent(event))
+        result.push({
+            tableName: cal.tableName,
+            icalendar: calendar,
+        })
     })
-    icalEvents.forEach(event => result.createEvent(event))
     return result
+}
+const createFilename = (initialFilename, tableName, suffix) => {
+    const prefix = initialFilename.endsWith(`.${suffix}`) ? initialFilename.substr(0, initialFilename.length - suffix.length + 1) : initialFilename
+    const name = tableName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+    return `${prefix}.${name}.${suffix}`
 }
 /**
  * Construct and write a single ICalendar from 1+ Urls to PDF Calendars (Northeastern format)
@@ -319,11 +350,17 @@ async function createICalendar(calendarSheetsUrls, calendarTitle, fallYear) {
  * @param {number} fallYear
  * @param {string} icalendarFilename name of icalendar file to be created
  */
-async function writeICalendar(calendarSheetsUrls, calendarTitle, fallYear, icalendarFilename) {
-    const icalendar = await createICalendar(calendarSheetsUrls, calendarTitle, fallYear)
-    await writeFileAsync(icalendarFilename, icalendar.toString())
+async function writeICalendars(calendarSheetsUrls, calendarTitle, fallYear, icalendarFilename) {
+    const result = []
+    const icalendars = await createICalendars(calendarSheetsUrls, calendarTitle, fallYear)
+    for(let i = 0; i < icalendars.length; i += 1) {
+        const filename = createFilename(icalendarFilename, icalendars[i].tableName.length > 0 ? icalendars[i].tableName : i.toString(), 'ical')
+        await writeFileAsync(filename, icalendars[i].icalendar.toString())
+        result.push(filename)
+    }
+    return result
 }
 module.exports = {
-    createICalendar,
-    writeICalendar
+    createICalendars,
+    writeICalendars
 }
