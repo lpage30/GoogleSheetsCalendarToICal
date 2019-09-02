@@ -255,7 +255,7 @@ const getICalEvents = (extractedScheduleEvent, fallYear) => {
 function extractTableRows(headElement, tableNames, useTableNames) {
     const result = []
     if (headElement.table && (!useTableNames || tableNames.length > 0)) {
-        const tableName = tableNames.length > 0 ? ` ${tableNames[0]}` : ''
+        const tableName = tableNames.length > 0 ? tableNames[0] : ''
         tableNames.shift()
         const items = []
         headElement.table.tbody.tr.forEach(tr => {
@@ -324,10 +324,10 @@ async function googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear) {
 async function createICalendars(calendarSheetsUrls, calendarTitle, fallYear) {
     const icalEvents = await googleSheetsUrlsToICalEvents(calendarSheetsUrls, fallYear)
     const result = []
-    icalEvents.forEach(cal => {
+    icalEvents.forEach((cal, index) => {
         cal.events.sort((l, r) => sortDateAsc(l.start, r.start))
         const calendar = ical({
-            name: `${calendarTitle}${cal.tableName}`,
+            name: `${calendarTitle} ${cal.tableName.length > 0 ? cal.tableName : (index + 1).toString()}`,
         })
         cal.events.forEach(event => calendar.createEvent(event))
         result.push({
@@ -338,7 +338,9 @@ async function createICalendars(calendarSheetsUrls, calendarTitle, fallYear) {
     return result
 }
 const createFilename = (initialFilename, tableName, suffix) => {
-    const prefix = initialFilename.endsWith(`.${suffix}`) ? initialFilename.substr(0, initialFilename.length - suffix.length + 1) : initialFilename
+    const prefix = initialFilename.endsWith(`.${suffix}`) ? 
+        initialFilename.substr(0, initialFilename.length - (suffix.length + 1)) :
+        initialFilename
     const name = tableName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
     return `${prefix}.${name}.${suffix}`
 }
@@ -354,7 +356,10 @@ async function writeICalendars(calendarSheetsUrls, calendarTitle, fallYear, ical
     const result = []
     const icalendars = await createICalendars(calendarSheetsUrls, calendarTitle, fallYear)
     for(let i = 0; i < icalendars.length; i += 1) {
-        const filename = createFilename(icalendarFilename, icalendars[i].tableName.length > 0 ? icalendars[i].tableName : i.toString(), 'ical')
+        const filename = createFilename(
+            icalendarFilename,
+            icalendars[i].tableName.length > 0 ? icalendars[i].tableName : (i + 1).toString(),
+            'ical')
         await writeFileAsync(filename, icalendars[i].icalendar.toString())
         result.push(filename)
     }

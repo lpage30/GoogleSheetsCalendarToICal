@@ -1,5 +1,7 @@
 # GoogleSheetsCalendarToICal
-Calendars specified in GoogleSheets should be ICal format or have ICal option. Spreadsheet is not useful to the tech savvy.
+Calendars specified in GoogleSheets should be ICal format or have ICal option.
+Spreadsheet is not useful to the tech savvy. Multiple calendars can reside in each downloaded GoogleSheet.
+Each of these calendars will be in its own table.
 
 ## USAGE
 obtain 1 or more URLs for Google Sheets Calendars  
@@ -22,7 +24,7 @@ Options
                              icalendar file.                                                               
   -h, --help                 Usage or help information                                                     
 ```
-Generates a single ical file: googlesheets.ical: 
+Generates a 1 ical file for each table discovered : googlesheetsical: 
 example:
 ```
  npm run ConvertToICal -- -i 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSoARRvPLLH7NaG_AD7Jf2fHv-d9XXhW7nZLsSHiRWiQCqC7a-mg8nx15mxxjsyFqF_lJ5YGPaJo-WF/pubhtml'
